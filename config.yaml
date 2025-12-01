@@ -1,0 +1,75 @@
+# connectivity and auth
+cw_public_key: xxxxx
+
+# polling interval in minutes for new cases
+stellar_poll_interval: 5
+
+# tag to add to a stellar case after CW ticket is opened
+stellar_case_tag: "CW_Ticket_Opened"
+
+# minimum number of security alerts in a case
+# leave 0 or blank for no min count
+# set to "auto" to use the threshold set in the UI for cases - do not use for now
+stellar_min_alert_cnt: 0
+
+# min score to use as a threshold for opening a case
+# leave 0 or blank for no threshold
+stellar_min_score: 0
+
+# ticket information
+ticket:
+  summary_prefix: 'Stellar Case:'
+  # name of company to use if tenant name cannot be matched to an existing company
+  default_company: "Catchall"
+  default_board: "SOC"
+
+  # set to true to avoid company lookup and hardcode the default company when creating a ticket
+  avoid_company_lookup: true
+
+  # set to true to avoid performing a board lookup and hardcode the default board name when creating a ticket
+  avoid_board_lookup: true
+
+  # only used for custom status
+  status: "New"
+
+# call the function "get_ticket_priority" to get ids for each
+# comment out entire SLA section to ignore and set to default
+#Priority id: [7] name: [Low (White)]
+#Priority id: [10] name: [No SLA (Blue)]
+#Priority id: [12] name: [Do Not Respond (Black)]
+#Priority id: [16] name: [Urgent (Red)]
+#Priority id: [17] name: [High (Yellow)]
+#Priority id: [18] name: [Normal (Green)]
+#Priority id: [20] name: [Planned (Purple)]
+#Priority id: [21] name: [Issue (Cyan)]
+SLA:
+  LOW:
+    min: 1
+    cw_priority_id: 7
+  MED:
+    min: 50
+    cw_priority_id: 18
+  HIGH:
+    min: 75
+    cw_priority_id: 17
+  CRITICAL:
+    min: 90
+    cw_priority_id: 16
+
+# tenant to CW company name mapping
+# if no mapping is found for a tenant name, then the real name is tried
+# if that fails, then the default_company is used
+tenant_map:
+  # stellar tenant name: connectwise name
+  SomeStellarTenant: "Some Connectwise Company"
+
+
+###########
+#
+# SYNCS
+
+# sync connectwise resolved status back to stellar
+cw_sync_resolved: true
+
+# sync connectwise notes back to stellar comments
+cw_sync_notes: true
