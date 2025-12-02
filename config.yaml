@@ -20,7 +20,7 @@ stellar_min_score: 0
 ticket:
   summary_prefix: 'Stellar Case:'
 
-  # enter the tenant name in the summary above (will appear before the summary_prefix)
+  # set to true to have the tenant name included in the summary (will appear before the summary_prefix)
   # example: "[MYSTELLARTENANT] <summary prefix>: <case name>"
   # (added 20251202.000)
   summary_prefix_includes_tenant_name: true
