@@ -1,10 +1,11 @@
-__version__ = '20251201.000'
+__version__ = '20251202.000'
 
 '''
     Provides methods to call ConnctWise API for incident creation and update
 
     20240205.000    initial
     20251201.000    several updates and enhancements to get_company
+    20251202.000    added option to add tenant_name to summary line
 
 '''
 
@@ -25,13 +26,16 @@ class ConnectWise:
         self.cw_public_key = config.get('cw_public_key')
         self.cw_client_id = config.get('cw_client_id')
 
-        self.cw_default_company = config['ticket']['default_company']
-        self.cw_avoid_company_lookup = config.get('ticket', {}).get('avoid_company_lookup', False)
-        self.cw_default_board = config['ticket']['default_board']
-        self.cw_use_default_board = config['ticket'].get('avoid_board_lookup', False)
-        self.ticket_prefix = config['ticket']['summary_prefix']
+        ticket_config = config.get('ticket', {})
+        self.cw_default_company = ticket_config.get('default_company', '')
+        self.cw_avoid_company_lookup = ticket_config.get('avoid_company_lookup', False)
+        self.cw_default_board = ticket_config.get('default_board, ''')
+        self.cw_use_default_board = ticket_config.get('avoid_board_lookup', False)
+        self.ticket_prefix = ticket_config.get('summary_prefix', '')
+        # added 20251202.000 to support tenant name as prefix
+        self.ticket_prefix_includes_tenant_name = ticket_config.get('summary_prefix_includes_tenant_name', '')
         # added 20220721.000 to support ticket status
-        self.cw_ticket_status = config['ticket']['status']
+        self.cw_ticket_status = ticket_config.get('status', '')
         if self.cw_ticket_status == 'New':
             self.cw_ticket_status = ''
 
@@ -71,11 +75,14 @@ class ConnectWise:
 
     def create_ticket(self, ticket_summary, company_name, board_name='', event_score=0):
         new_ticket_id = 0
+        tenant_name = company_name
         company_id = self.get_company(company_name)
         (priority_name, priority_id) = self.get_ticket_priority(event_score)
         summary_string = ticket_summary
         if self.ticket_prefix:
-            summary_string = '{} {}'.format(self.ticket_prefix, ticket_summary)
+            summary_string = '{} {}'.format(self.ticket_prefix, summary_string)
+        if self.ticket_prefix_includes_tenant_name and tenant_name:
+            summary_string = '[{}] {}'.format(tenant_name, summary_string)
         if priority_name:
             summary_string = '[{}] {}'.format(priority_name, summary_string)
         ticket_data = {
@@ -83,14 +90,9 @@ class ConnectWise:
             'company': {
                 'id': company_id
             },
-            # 'board': {
-            # 	# 'name': '{}'.format(board_name)
-            # 	'id': board_id
-            # },
             # added 20220721.000 to support ticket status
             'status': {
                 'name': '{}'.format(self.cw_ticket_status)
-                # 'name': ''
             }
         }
 
