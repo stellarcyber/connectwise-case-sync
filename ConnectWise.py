@@ -33,7 +33,7 @@ class ConnectWise:
         self.cw_use_default_board = ticket_config.get('avoid_board_lookup', False)
         self.ticket_prefix = ticket_config.get('summary_prefix', '')
         # added 20251202.000 to support tenant name as prefix
-        self.ticket_prefix_includes_tenant_name = ticket_config.get('summary_prefix_includes_tenant_name', '')
+        self.ticket_prefix_includes_tenant_name = ticket_config.get('summary_prefix_includes_tenant_name', False)
         # added 20220721.000 to support ticket status
         self.cw_ticket_status = ticket_config.get('status', '')
         if self.cw_ticket_status == 'New':
