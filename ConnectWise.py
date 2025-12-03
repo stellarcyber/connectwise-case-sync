@@ -1,4 +1,4 @@
-__version__ = '20251202.000'
+__version__ = '20251203.000'
 
 '''
     Provides methods to call ConnctWise API for incident creation and update
@@ -6,6 +6,7 @@ __version__ = '20251202.000'
     20240205.000    initial
     20251201.000    several updates and enhancements to get_company
     20251202.000    added option to add tenant_name to summary line
+    20251203.000    fixed small bug involving default_board
 
 '''
 
@@ -29,7 +30,7 @@ class ConnectWise:
         ticket_config = config.get('ticket', {})
         self.cw_default_company = ticket_config.get('default_company', '')
         self.cw_avoid_company_lookup = ticket_config.get('avoid_company_lookup', False)
-        self.cw_default_board = ticket_config.get('default_board, ''')
+        self.cw_default_board = ticket_config.get('default_board', '')
         self.cw_use_default_board = ticket_config.get('avoid_board_lookup', False)
         self.ticket_prefix = ticket_config.get('summary_prefix', '')
         # added 20251202.000 to support tenant name as prefix
