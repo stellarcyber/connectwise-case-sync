@@ -1,4 +1,4 @@
-__version__ = '20251203.000'
+__version__ = '20251204.000'
 
 '''
     Provides methods to call ConnctWise API for incident creation and update
@@ -7,6 +7,9 @@ __version__ = '20251203.000'
     20251201.000    several updates and enhancements to get_company
     20251202.000    added option to add tenant_name to summary line
     20251203.000    fixed small bug involving default_board
+    20251203.001    added method for getting audit records
+    20251203.002    changed the method for getting notes to allNotes (which works better for some reason)
+    20251204.000    added methods to support ticket ownership change events
 
 '''
 
@@ -33,8 +36,10 @@ class ConnectWise:
         self.cw_default_board = ticket_config.get('default_board', '')
         self.cw_use_default_board = ticket_config.get('avoid_board_lookup', False)
         self.ticket_prefix = ticket_config.get('summary_prefix', '')
-        # added 20251202.000 to support tenant name as prefix
+        # added 20251202.000 to support tenant name in prefix
         self.ticket_prefix_includes_tenant_name = ticket_config.get('summary_prefix_includes_tenant_name', False)
+        # added 20251203.001 to support case number in prefix
+        self.ticket_prefix_includes_case_number = ticket_config.get('summary_prefix_includes_case_number', False)
         # added 20220721.000 to support ticket status
         self.cw_ticket_status = ticket_config.get('status', '')
         if self.cw_ticket_status == 'New':
@@ -74,7 +79,7 @@ class ConnectWise:
 
         return ret
 
-    def create_ticket(self, ticket_summary, company_name, board_name='', event_score=0):
+    def create_ticket(self, ticket_summary, company_name, board_name='', event_score=0, stellar_case_number=None):
         new_ticket_id = 0
         tenant_name = company_name
         company_id = self.get_company(company_name)
@@ -84,6 +89,8 @@ class ConnectWise:
             summary_string = '{} {}'.format(self.ticket_prefix, summary_string)
         if self.ticket_prefix_includes_tenant_name and tenant_name:
             summary_string = '[{}] {}'.format(tenant_name, summary_string)
+        if self.ticket_prefix_includes_case_number and stellar_case_number:
+            summary_string = '[{}] {}'.format(stellar_case_number, summary_string)
         if priority_name:
             summary_string = '[{}] {}'.format(priority_name, summary_string)
         ticket_data = {
@@ -337,13 +344,39 @@ class ConnectWise:
         _HEADERS_ = self.headers
         l = self.l
         l.info("Getting ticket notes: [{}]".format(ticket_id))
-        url = "{}/service/tickets/{}/notes".format(_URL_, ticket_id)
+        # url = "{}/service/tickets/{}/notes".format(_URL_, ticket_id)
+        url = "{}/service/tickets/{}/allNotes".format(_URL_, ticket_id)
         r = requests.get(url=url, headers=_HEADERS_, auth=_AUTH_)
-        rr = json.loads(r.text)
-        # printable_r = json.dumps(rr, indent=4, sort_keys=True)
-        # l.debug(printable_r)
-        # print(printable_r)
+        if 200 <= r.status_code <= 299:
+            rr = json.loads(r.text)
+        else:
+            self.l.error("Problem getting ticket notes: [{}]".format(ticket_id))
         return rr
+
+    def get_audit_records(self, ticket_id):
+        _URL_ = self.base_url
+        _AUTH_ = self.auth
+        _HEADERS_ = self.headers
+        rr = {}
+        self.l.info("Getting audit records: [{}]".format(ticket_id))
+        # url = "{}/service/tickets/{}/notes".format(_URL_, ticket_id)
+        url = "{}/system/audittrail?type=Ticket&id={}".format(_URL_, ticket_id)
+        r = requests.get(url=url, headers=_HEADERS_, auth=_AUTH_)
+        if 200 <= r.status_code <= 299:
+            rr = json.loads(r.text)
+        else:
+            self.l.error("Problem getting audit records: [{}]".format(ticket_id))
+        return rr
+
+    def get_ticket_ownership_change(self, ticket_id):
+        ret = {}
+        audit_records = self.get_audit_records(ticket_id)
+        # pick out only ownership record changes
+        for ar in audit_records:
+            if ar.get('auditType', '') == "Resource" and ar.get('auditSubType', '') == "Owner":
+                ret = ar
+                break
+        return ret
 
     def get_ticket(self, ticket_id):
         _URL_ = self.base_url
@@ -362,6 +395,23 @@ class ConnectWise:
         else:
             l.error("Error retrieving CW ticket id: {} [{}: {}]".format(ticket_id, r.status_code, r.text))
         return rr
+
+    def get_member_email_via_link(self, member_link):
+        ''' the direct member link is obtained from the ticket response json - owner '''
+        _AUTH_ = self.auth
+        _HEADERS_ = self.headers
+        email = ''
+        l = self.l
+        l.info("Getting email for member via direct link: [{}]".format(member_link))
+        rr = {}
+        url = member_link
+        r = requests.get(url=url, headers=_HEADERS_, auth=_AUTH_)
+        if 200 <= r.status_code <= 299:
+            rr = json.loads(r.text)
+            email = rr.get('primaryEmail', '')
+        else:
+            l.error("Error retrieving direct member link: [{}]".format(member_link))
+        return email
 
     def create_ticket_note_text(self, case_summary :str, case_tenant_name :str, case_url :str, alerts=[]):
         ticket_note_text = "{}\n\n{}\n\n{}\n\n".format(case_summary, case_tenant_name, case_url)
