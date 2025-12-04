@@ -1,4 +1,4 @@
-__version__ = '20251204.000'
+__version__ = '20251204.001'
 
 '''
     Provides methods to call ConnctWise API for incident creation and update
@@ -10,6 +10,7 @@ __version__ = '20251204.000'
     20251203.001    added method for getting audit records
     20251203.002    changed the method for getting notes to allNotes (which works better for some reason)
     20251204.000    added methods to support ticket ownership change events
+    20251204.001    added truncation for max ticket summary length of 100
 
 '''
 
@@ -93,6 +94,8 @@ class ConnectWise:
             summary_string = '[{}] {}'.format(stellar_case_number, summary_string)
         if priority_name:
             summary_string = '[{}] {}'.format(priority_name, summary_string)
+        # truncate to CW max summary len of 100 chars
+        summary_string = "{:.99}".format(summary_string)
         ticket_data = {
             'summary': '{}'.format(summary_string),
             'company': {
