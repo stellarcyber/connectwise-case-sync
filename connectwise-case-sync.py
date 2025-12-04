@@ -1,11 +1,15 @@
 #!/usr/bin/env python
 
 '''
-	version:		20221004.001
+	version:		20251203.000
 	description:	connectwise integration script used to create Manage Service Tickets
 
     20251201.000    forked branch for improved efficiency and updated syncs
                     support for syncing CW resolution status and notes
+
+    20251203.000    added capability for syncing audit records
+    20251204.000    added capability for syncing ticket owner to case assignee
+    20251204.001    changed the sync of ticket resolution to support all ticket status changes
 
 '''
 
@@ -73,18 +77,32 @@ if __name__ == "__main__":
         POLL_INTERVAL = int(config.get('stellar_polling_interval', 5)) * 60
 
         ''' syncs '''
-        CW_SYNC_RESOLVED = config.get('cw_sync_resolved', False)
+        CW_SYNC_STATUS = config.get('cw_sync_status', False)
+        if CW_SYNC_STATUS:
+            CW_SYNC_STATUS_MAP = config.get('cw_sync_status_map', {})
+        CW_SYNC_OWNER = config.get('cw_sync_ticket_owner', False)
         CW_SYNC_NOTES = config.get('cw_sync_notes', False)
+        CW_SYNC_AUDIT_RECORDS = config.get('cw_sync_audit_records', False)
+        if CW_SYNC_AUDIT_RECORDS:
+            # disabling note sync as this would be redundant
+            CW_SYNC_NOTES = False
 
         CW = ConnectWise(logger=l, config=config)
         SU = STELLAR_UTIL.STELLAR_UTIL(logger=l, config=config, optional_data_path=args.data_volume)
         LDB = STELLAR_UTIL.local_db(ticket_table_name='cw_tickets', optional_db_dir=args.data_volume)
 
-
         ''' testing goes here '''
         # test 1
         # exit(0)
-
+        # r = CW.get_audit_items("1562098")
+        # print(json.dumps(r, indent=4))
+        # exit(0)
+        # r = CW.get_member_email_via_link("https://portal.netgaincloud.com/v4_6_release/apis/3.0/system/members/651")
+        # print(r)
+        # exit(0)
+        # r = CW.get_ticket_ownership_change("1562095")
+        # print(json.dumps(r, indent=4))
+        # exit(0)
 
         ''' main loop for processing tickets / cases '''
         while True:
@@ -102,19 +120,41 @@ if __name__ == "__main__":
                 l.debug("Checking CW ticket: [{}] [last updated: {}]".format(rt_ticket_number, rt_ticket_last_modified))
 
                 ''' check on ticket resolution '''
-                if CW_SYNC_RESOLVED:
-
+                if CW_SYNC_STATUS:
                     ''' pull cw ticket '''
                     cw_ticket = CW.get_ticket(rt_ticket_number)
                     cw_status = cw_ticket.get('status', {}).get('name', '')
-                    if cw_status == "Resolved: Closed":
-                        l.info("CW ticket in resolved state [{}] | closing related stellar case: [{}]".format(rt_ticket_number, stellar_case_id))
+                    stellar_status = ''
+                    if cw_status in CW_SYNC_STATUS_MAP:
+                        stellar_status = CW_SYNC_STATUS_MAP.get(cw_status, '')
+                    else:
+                        stellar_status = CW_SYNC_STATUS_MAP.get('default', '')
+                    if stellar_status.lower() in ["resolved", "cancelled"]:
+                        l.info("CW ticket in state [{} {}] | closing related stellar case: [{}]".format(rt_ticket_number, cw_status, stellar_case_id))
                         SU.resolve_stellar_case(case_id=stellar_case_id, update_alerts=True)
                         LDB.close_ticket_linkage(stellar_case_id=stellar_case_id)
+                    else:
+                        l.info("CW ticket in state [{} {}] | updating related stellar case: [{}]".format(rt_ticket_number, cw_status, stellar_case_id))
+                        SU.update_stellar_case (case_id=stellar_case_id, case_status=stellar_status, update_tag=False)
+                        LDB.update_remote_ticket_timestamp(stellar_case_id=stellar_case_id)
+
+                ''' check on ticket ownership '''
+                if CW_SYNC_OWNER:
+                    ''' get ownership changes from audit records '''
+                    owner_record = CW.get_ticket_ownership_change(rt_ticket_number)
+                    if owner_record:
+                        owner_record_ts_str = owner_record.get('enteredDate', "1970-01-01T00:00:00Z")
+                        owner_record_ts = CW.datestring_to_epoch(owner_record_ts_str)
+                        if owner_record_ts > rt_ticket_last_modified:
+                            cw_ticket = CW.get_ticket(rt_ticket_number)
+                            owner_link = cw_ticket.get('owner', {}).get('_info', {}).get('member_href', '')
+                            if owner_link:
+                                new_owner_email = CW.get_member_email_via_link(owner_link)
+                                SU.update_stellar_case_assignee(case_id=stellar_case_id, case_assignee=new_owner_email)
+                                LDB.update_remote_ticket_timestamp(stellar_case_id=stellar_case_id)
 
                 ''' check on new notes '''
                 if CW_SYNC_NOTES:
-
                     ''' pull notes '''
                     cw_ticket_notes = CW.get_ticket_notes(ticket_id=rt_ticket_number)
                     for cw_ticket_note in cw_ticket_notes:
@@ -125,6 +165,26 @@ if __name__ == "__main__":
                         if cw_note_ts > rt_ticket_last_modified:
                             l.info("Updating stellar case: [{}] with ticket note id: [{}]".format(stellar_case_id, cw_note_id))
                             SU.add_case_comment(case_id=stellar_case_id, comment=cw_note_text)
+                            LDB.update_remote_ticket_timestamp(stellar_case_id=stellar_case_id)
+
+                ''' check on audit items '''
+                if CW_SYNC_AUDIT_RECORDS:
+                    ''' pull audit records  '''
+                    cw_audit_records = CW.get_audit_records(ticket_id=rt_ticket_number)
+                    for cw_audit_record in cw_audit_records:
+                        cw_ar_text = cw_audit_record.get('text', '')
+                        cw_ar_entered_by = cw_audit_record.get('enteredBy', '')
+                        cw_ar_audit_type = cw_audit_record.get('auditType', '')
+                        cw_ar_audit_subtype = cw_audit_record.get('auditSubType', '')
+                        cw_ar_audit_source = cw_audit_record.get('auditSource', '')
+                        # cw_note_ts_str = cw_audit_record.get('enteredDate')
+                        cw_note_ts_str = cw_audit_record.get('enteredDate', "1970-01-01T00:00:00Z")
+                        cw_note_ts = CW.datestring_to_epoch(cw_note_ts_str)
+                        if cw_note_ts > rt_ticket_last_modified:
+                            stellar_comment_string = 'CW audit record\nType: {} Subtype: {} Time: {} By: {}\n[{}]'.format(
+                                cw_ar_audit_type, cw_ar_audit_subtype, cw_note_ts_str, cw_ar_entered_by, cw_ar_text)
+                            l.info("Updating stellar case: [{}] with ticket audit record: [{} / {}]".format(stellar_case_id, cw_note_ts_str, cw_ar_entered_by))
+                            SU.add_case_comment(case_id=stellar_case_id, comment=stellar_comment_string)
                             LDB.update_remote_ticket_timestamp(stellar_case_id=stellar_case_id)
 
 
@@ -150,7 +210,7 @@ if __name__ == "__main__":
                 l.info(
                     "Stellar Case ID: [{}] | Ticket Number: [{}] | URL: [{}]".format(stellar_case_id, stellar_case_number,
                                                                                      stellar_url))
-                new_ticket_id = CW.create_ticket(ticket_summary=case_name, company_name=case_tenant_name, event_score=case_score)
+                new_ticket_id = CW.create_ticket(ticket_summary=case_name, company_name=case_tenant_name, event_score=case_score, stellar_case_number=stellar_case_number)
                 if new_ticket_id:
                     ticket_note_text = CW.create_ticket_note_text(case_summary=case_summary,
                                                                   case_tenant_name=case_tenant_name, case_url=stellar_url,
