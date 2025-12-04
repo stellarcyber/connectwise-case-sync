@@ -24,6 +24,10 @@ ticket:
   # example: "[MYSTELLARTENANT] <summary prefix>: <case name>"
   summary_prefix_includes_tenant_name: true
 
+  # set to true to have the stellar case number included in the summary
+  # example: "[12345] <summary prefix>: <case name>"
+  summary_prefix_includes_case_number: true
+
   # name of company to use if tenant name cannot be matched to an existing company
   default_company: "Catchall"
   default_board: "SOC"
