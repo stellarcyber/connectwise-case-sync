@@ -22,9 +22,8 @@ ticket:
 
   # set to true to have the tenant name included in the summary (will appear before the summary_prefix)
   # example: "[MYSTELLARTENANT] <summary prefix>: <case name>"
-  # (added 20251202.000)
   summary_prefix_includes_tenant_name: true
-  
+
   # name of company to use if tenant name cannot be matched to an existing company
   default_company: "Catchall"
   default_board: "SOC"
@@ -74,8 +73,28 @@ tenant_map:
 #
 # SYNCS
 
-# sync connectwise resolved status back to stellar
-cw_sync_resolved: true
+# sync connectwise ticket status back to stellar
+cw_sync_status: true
+
+# if cw_sync_status is set to true, the following mapping must be complete
+# CW Ticket Status: Stellar Case Status
+# the Stellar Case status must be one of "New", "In Progress", "Escalated", "Resolved", "Cancelled"
+# use the default key if for all other CW status
+cw_sync_status_map:
+  "New": "New"
+  "Open: In Progress": "In Progress"
+  "Escalated: Internal": "In Progress"
+  "Resolved: Closed": "In Progress"
+  "Resolved: Canceled": "In Progress"
+  default: "In Progress"
+
 
 # sync connectwise notes back to stellar comments
-cw_sync_notes: true
+cw_sync_notes: false
+
+# sync connectwise audit trail back to stellar comments
+# if this is set to true, syncing notes will be disabled as this would be redundant
+cw_sync_audit_records: true
+
+# sync connectwise ticket owner to stellar case assignee
+cw_sync_ticket_owner: true
