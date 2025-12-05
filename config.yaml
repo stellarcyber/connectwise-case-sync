@@ -1,3 +1,5 @@
+# version: 20251205.000
+
 # connectivity and auth
 cw_public_key: xxxxx
 
@@ -102,3 +104,9 @@ cw_sync_audit_records: true
 
 # sync connectwise ticket owner to stellar case assignee
 cw_sync_ticket_owner: true
+
+# normal ticket owner changes are triggered by an entry in the audit log
+# it is found that initial ticket changes sometimes fail to record the owner assignment
+# setting this to true will force the owner update regardless if there is an audit record or not
+# cw_sync_ticket_owner must be true for this to take effect
+cw_force_owner_sync: true
