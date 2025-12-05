@@ -1,4 +1,4 @@
-__version__ = '20251204.001'
+__version__ = '20251205.000'
 
 '''
     Provides methods to call ConnctWise API for incident creation and update
@@ -11,6 +11,7 @@ __version__ = '20251204.001'
     20251203.002    changed the method for getting notes to allNotes (which works better for some reason)
     20251204.000    added methods to support ticket ownership change events
     20251204.001    added truncation for max ticket summary length of 100
+    20251205.000    added method get_tickets which retrieves tickets modified since TS
 
 '''
 
@@ -79,6 +80,42 @@ class ConnectWise:
             raise Exception("Connectivity test FAILED - cannot continue")
 
         return ret
+
+    def get_ticket(self, ticket_id):
+        _URL_ = self.base_url
+        _AUTH_ = self.auth
+        _HEADERS_ = self.headers
+        l = self.l
+        l.info("Getting ticket: [{}]".format(ticket_id))
+        rr = {}
+        url = "{}/service/tickets/{}".format(_URL_, ticket_id)
+        r = requests.get(url=url, headers=_HEADERS_, auth=_AUTH_)
+        if 200 <= r.status_code <= 299:
+            rr = json.loads(r.text)
+            # printable_r = json.dumps(rr, indent=4, sort_keys=True)
+            # l.debug(printable_r)
+            # print(printable_r)
+        else:
+            l.error("Error retrieving CW ticket id: {} [{}: {}]".format(ticket_id, r.status_code, r.text))
+        return rr
+
+    def get_tickets(self, since_ts_epoch):
+        _URL_ = self.base_url
+        _AUTH_ = self.auth
+        _HEADERS_ = self.headers
+        since_ts_str = self._epoch_to_datestring(since_ts_epoch)
+        rr = {}
+        if since_ts_str:
+            self.l.info("Getting tickets since: [{}] UTC".format(since_ts_str))
+            url = '{}/service/tickets?conditions=lastUpdated > "{}"'.format(_URL_, since_ts_str)
+            r = requests.get(url=url, headers=_HEADERS_, auth=_AUTH_)
+            if 200 <= r.status_code <= 299:
+                rr = json.loads(r.text)
+            else:
+                self.l.error("Error retrieving CW tickets: [{}: {}]".format(r.status_code, r.text))
+        else:
+            self.l.error("Cannot get ticket - echoch to string broken: [{}]".format(since_ts_epoch))
+        return rr
 
     def create_ticket(self, ticket_summary, company_name, board_name='', event_score=0, stellar_case_number=None):
         new_ticket_id = 0
@@ -240,6 +277,35 @@ class ConnectWise:
         print("count: {}".format(item_cnt))
         return
 
+    def get_board(self, board_name, last_try=False):
+        self.l.info("Finding board name: [{}]".format(board_name))
+        ret_id = 0
+        url = '{}/service/boards?conditions=name="{}"&fields=id,name,status'.format(self.base_url, board_name)
+        r = requests.get(url=url, headers=self.headers, auth=self.auth)
+        if 200 <= r.status_code <= 299:
+            rr = json.loads(r.text)
+            for c in rr:
+                if 'id' in c:
+                    ret_id = c['id']
+                    self.l.info("Found board id: [{}]".format(ret_id))
+                    break
+        # printable_r = json.dumps(rr, indent=4, sort_keys=True)
+        # l.debug(printable_r)
+        # print(printable_r)
+        else:
+            self.l.error("Error querying boards: [{}: {}]".format(r.status_code, r.text))
+
+        if not ret_id:
+            if last_try:
+                raise Exception("Service Board Name lookup failure: [{}]. Cannot create ticket.".format(board_name))
+            else:
+                # lookup the default company
+                self.l.warning("Board name [{}] could not be found. Looking up the default board: [{}]".format(board_name,
+                                                                                                          self.cw_default_board))
+                ret_id = self.get_board(self.cw_default_board, last_try=True)
+
+        return ret_id
+
     def get_priorities(self):
         self.l.info("Getting all priorities")
         url = '{}/service/priorities?fields=id,name,status&pageSize=1000'.format(self.base_url)
@@ -285,34 +351,20 @@ class ConnectWise:
         self.l.info("Setting ticket priority: [{}: {}]".format(ticket_priority_id, ticket_sev))
         return (ticket_sev, ticket_priority_id)
 
-    def get_board(self, board_name, last_try=False):
-        self.l.info("Finding board name: [{}]".format(board_name))
-        ret_id = 0
-        url = '{}/service/boards?conditions=name="{}"&fields=id,name,status'.format(self.base_url, board_name)
-        r = requests.get(url=url, headers=self.headers, auth=self.auth)
+    def get_ticket_notes(self, ticket_id):
+        _URL_ = self.base_url
+        _AUTH_ = self.auth
+        _HEADERS_ = self.headers
+        l = self.l
+        l.info("Getting ticket notes: [{}]".format(ticket_id))
+        # url = "{}/service/tickets/{}/notes".format(_URL_, ticket_id)
+        url = "{}/service/tickets/{}/allNotes".format(_URL_, ticket_id)
+        r = requests.get(url=url, headers=_HEADERS_, auth=_AUTH_)
         if 200 <= r.status_code <= 299:
             rr = json.loads(r.text)
-            for c in rr:
-                if 'id' in c:
-                    ret_id = c['id']
-                    self.l.info("Found board id: [{}]".format(ret_id))
-                    break
-        # printable_r = json.dumps(rr, indent=4, sort_keys=True)
-        # l.debug(printable_r)
-        # print(printable_r)
         else:
-            self.l.error("Error querying boards: [{}: {}]".format(r.status_code, r.text))
-
-        if not ret_id:
-            if last_try:
-                raise Exception("Service Board Name lookup failure: [{}]. Cannot create ticket.".format(board_name))
-            else:
-                # lookup the default company
-                self.l.warning("Board name [{}] could not be found. Looking up the default board: [{}]".format(board_name,
-                                                                                                          self.cw_default_board))
-                ret_id = self.get_board(self.cw_default_board, last_try=True)
-
-        return ret_id
+            self.l.error("Problem getting ticket notes: [{}]".format(ticket_id))
+        return rr
 
     def create_ticket_note(self, ticket_id, ticket_note_text):
         _URL_ = self.base_url
@@ -341,21 +393,6 @@ class ConnectWise:
 
         return ticket_note_id
 
-    def get_ticket_notes(self, ticket_id):
-        _URL_ = self.base_url
-        _AUTH_ = self.auth
-        _HEADERS_ = self.headers
-        l = self.l
-        l.info("Getting ticket notes: [{}]".format(ticket_id))
-        # url = "{}/service/tickets/{}/notes".format(_URL_, ticket_id)
-        url = "{}/service/tickets/{}/allNotes".format(_URL_, ticket_id)
-        r = requests.get(url=url, headers=_HEADERS_, auth=_AUTH_)
-        if 200 <= r.status_code <= 299:
-            rr = json.loads(r.text)
-        else:
-            self.l.error("Problem getting ticket notes: [{}]".format(ticket_id))
-        return rr
-
     def get_audit_records(self, ticket_id):
         _URL_ = self.base_url
         _AUTH_ = self.auth
@@ -381,24 +418,6 @@ class ConnectWise:
                 break
         return ret
 
-    def get_ticket(self, ticket_id):
-        _URL_ = self.base_url
-        _AUTH_ = self.auth
-        _HEADERS_ = self.headers
-        l = self.l
-        l.info("Getting ticket: [{}]".format(ticket_id))
-        rr = {}
-        url = "{}/service/tickets/{}".format(_URL_, ticket_id)
-        r = requests.get(url=url, headers=_HEADERS_, auth=_AUTH_)
-        if 200 <= r.status_code <= 299:
-            rr = json.loads(r.text)
-            # printable_r = json.dumps(rr, indent=4, sort_keys=True)
-            # l.debug(printable_r)
-            # print(printable_r)
-        else:
-            l.error("Error retrieving CW ticket id: {} [{}: {}]".format(ticket_id, r.status_code, r.text))
-        return rr
-
     def get_member_email_via_link(self, member_link):
         ''' the direct member link is obtained from the ticket response json - owner '''
         _AUTH_ = self.auth
@@ -422,6 +441,28 @@ class ConnectWise:
             ticket_note_text += "- {}\n".format(alert)
         return ticket_note_text
 
+    def datestring_to_epoch(self, datestring):
+        epoch_time = 0
+        dformat = "%Y-%m-%dT%H:%M:%S%z"
+        try:
+            epoch_time = int(datetime.strptime(datestring, dformat).timestamp()) * 1000
+        except(ValueError) as e:
+            self.l.error("Time conversion error: [{}]".format(e))
+        return epoch_time
+
+    def _epoch_to_datestring(self, ts_epoch):
+        ts_string = ''
+        dformat = "%Y-%m-%dT%H:%M:%S%z"
+        try:
+            ts_dt = datetime.utcfromtimestamp(ts_epoch)
+            ts_string = datetime.strftime(ts_dt, dformat)
+
+        # (datetime.strptime(datestring, dformat).timestamp()) * 1000)
+        except(ValueError) as e:
+            self.l.error("Time conversion error: [{}]".format(e))
+
+        return ts_string
+
     def _get_company_info(self):
         ret = ''
         url = 'https://{}/login/companyinfo/{}'.format(self.cw_host, self.cw_company_id)
@@ -437,13 +478,3 @@ class ConnectWise:
             self.l.error("No codebase returned - cannot continue")
             raise Exception("No codebase returned - cannot continue")
         return ret
-
-    def datestring_to_epoch(self, datestring):
-        # dformat = "%Y-%m-%dT%H:%M:%S.%f+0000"   # broken most of the time
-        epoch_time = 0
-        dformat = "%Y-%m-%dT%H:%M:%S%z"
-        try:
-            epoch_time = int(datetime.strptime(datestring, dformat).timestamp()) * 1000
-        except(ValueError) as e:
-            self.l.error("Time conversion error: [{}]".format(e))
-        return epoch_time
