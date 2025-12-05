@@ -97,28 +97,15 @@ if __name__ == "__main__":
 
         ''' testing goes here '''
         # test 1
-        # exit(0)
-        # r = CW.get_audit_items("1562098")
-        # print(json.dumps(r, indent=4))
-        # exit(0)
-        # r = CW.get_member_email_via_link("https://portal.netgaincloud.com/v4_6_release/apis/3.0/system/members/651")
-        # print(r)
-        # exit(0)
-        # r = CW.get_ticket_ownership_change("1562095")
-        # print(json.dumps(r, indent=4))
-        # exit(0)
-        # r = CW._epoch_to_datestring(1764960695)
-        # print(r)
-        # exit(0)
 
         ''' main loop for processing tickets / cases '''
         while True:
 
             ts_start_of_loop = time()
 
-            '''
-                get CW tickets since checkpoint and compare with DB to see if they are sync'd
-            '''
+            ''''''
+            '''   get CW tickets since checkpoint and compare with DB to see if they are sync'd '''
+            ''''''
             r = CW.test_connection()
             NEW_CHECKPOINT_TS = int(time() * 1000)
             CHECKPOINT_TS = round(int(SU.checkpoint_read(filepath=CW_CHECKPOINT_FILENAME))/1000)
@@ -162,6 +149,7 @@ if __name__ == "__main__":
                                     new_owner_email = CW.get_member_email_via_link(owner_link)
                                     SU.update_stellar_case_assignee(case_id=stellar_case_id, case_assignee=new_owner_email)
                                     LDB.update_remote_ticket_timestamp(stellar_case_id=stellar_case_id, rt_ticket_ts=cw_ticket_updated_ts)
+                                    l.info("Updated stellar case with assignee: [{}] [{}]".format(stellar_case_id, new_owner_email))
 
                             else:
                                 ''' get ownership changes from audit records '''
@@ -175,6 +163,8 @@ if __name__ == "__main__":
                                             new_owner_email = CW.get_member_email_via_link(owner_link)
                                             SU.update_stellar_case_assignee(case_id=stellar_case_id, case_assignee=new_owner_email)
                                             LDB.update_remote_ticket_timestamp(stellar_case_id=stellar_case_id, rt_ticket_ts=cw_ticket_updated_ts)
+                                            l.info("Updated stellar case with assignee: [{}] [{}]".format(stellar_case_id,
+                                                                                                       new_owner_email))
 
                         ''' check on new notes '''
                         if CW_SYNC_NOTES:
@@ -210,15 +200,15 @@ if __name__ == "__main__":
                                     SU.add_case_comment(case_id=stellar_case_id, comment=stellar_comment_string)
                                     LDB.update_remote_ticket_timestamp(stellar_case_id=stellar_case_id, rt_ticket_ts=cw_ticket_updated_ts)
 
-            '''                                             '''
+            ''''''
             ''' Complete CW loop                            '''
-            '''                                             '''
+            ''''''
             SU.checkpoint_write(filepath=CW_CHECKPOINT_FILENAME, val=NEW_CHECKPOINT_TS)
 
 
-            '''                                             '''
+            ''''''
             ''' get all STELLAR cases since last checkpoint '''
-            '''                                             '''
+            ''''''
             NEW_CHECKPOINT_TS = int(time() * 1000)
             CHECKPOINT_TS = int(SU.checkpoint_read(filepath=STELLAR_CHECKPOINT_FILENAME))
 
