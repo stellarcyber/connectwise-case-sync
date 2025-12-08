@@ -1,4 +1,4 @@
-__version__ = '20251029.000'
+__version__ = '20251208.000'
 
 """
 Provides utilitarian methods for general stellar cyber usage.
@@ -40,7 +40,8 @@ Provides utilitarian methods for general stellar cyber usage.
                 20251016.000    STELLAR_UTIL.update_stellar_case change in behavior - if unknown case status, ignore  
                 20251022.000    local_db get ticket linkage updates to return state (open/closed)  
                 20251027.000    added new STELLAR_UTIL method to return all case activities as a list (get_case_activities)
-                20251029.000    updated get_case_activities to summerize by type           
+                20251029.000    updated get_case_activities to summerize by type   
+                20251208.000    added method STELLAR_UTIL.cancel_stellar_case        
 """
 
 import os, sys
@@ -284,6 +285,14 @@ class STELLAR_UTIL:
             status_data['update_alerts'] = update_alerts
         if resolution and resolution in ["False Positive", "Benign", "True Positive"]:
             status_data['resolution'] = resolution
+        path = "/connect/api/v1/cases/{}".format(case_id)
+        self._request_put(path=path, data=status_data)
+        return
+
+    def cancel_stellar_case(self, case_id, update_alerts=True):
+        status_data = {"status": "Cancelled"}
+        if update_alerts:
+            status_data['update_alerts'] = update_alerts
         path = "/connect/api/v1/cases/{}".format(case_id)
         self._request_put(path=path, data=status_data)
         return
