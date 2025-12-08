@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 
 '''
-	version:		20251203.000
+	version:		20251208.000
 	description:	connectwise integration script used to create Manage Service Tickets
 
     20251201.000    forked branch for improved efficiency and updated syncs
@@ -13,6 +13,7 @@
     20251205.000    improved efficiency of checking sync'd CW tickets
                     added forced update for ownership
                     improved tracking for stellar cases
+    20251208.000    improved case closure sync
 
 '''
 
@@ -131,12 +132,16 @@ if __name__ == "__main__":
                                 stellar_status = CW_SYNC_STATUS_MAP.get(cw_status, '')
                             else:
                                 stellar_status = CW_SYNC_STATUS_MAP.get('default', '')
-                            if stellar_status.lower() in ["resolved", "cancelled"]:
-                                l.info("CW ticket in state [{} {}] | closing related stellar case: [{}]".format(rt_ticket_number, cw_status, stellar_case_id))
+                            if stellar_status.lower() in ["resolved"]:
+                                l.info("CW ticket in state [{} {}] | resolving related stellar case: [{}] [{}]".format(rt_ticket_number, cw_status, stellar_case_id, stellar_status))
                                 SU.resolve_stellar_case(case_id=stellar_case_id, update_alerts=True)
                                 LDB.close_ticket_linkage(stellar_case_id=stellar_case_id)
+                            elif stellar_status.lower() in ["cancelled"]:
+                                l.info("CW ticket in state [{} {}] | cencelling related stellar case: [{}] [{}]".format(rt_ticket_number, cw_status, stellar_case_id, stellar_status))
+                                SU.cancel_stellar_case(case_id=stellar_case_id, update_alerts=True)
+                                LDB.close_ticket_linkage(stellar_case_id=stellar_case_id)
                             else:
-                                l.info("CW ticket in state [{} {}] | updating related stellar case: [{}]".format(rt_ticket_number, cw_status, stellar_case_id))
+                                l.info("CW ticket in state [{} {}] | updating related stellar case: [{}] [{}]".format(rt_ticket_number, cw_status, stellar_case_id, stellar_status))
                                 SU.update_stellar_case (case_id=stellar_case_id, case_status=stellar_status, update_tag=False)
                                 LDB.update_remote_ticket_timestamp(stellar_case_id=stellar_case_id, rt_ticket_ts=cw_ticket_updated_ts)
 
