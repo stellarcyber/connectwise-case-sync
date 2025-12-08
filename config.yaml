@@ -1,4 +1,4 @@
-# version: 20251205.000
+# version: 20251208.000
 
 # connectivity and auth
 cw_public_key: xxxxx
@@ -89,9 +89,9 @@ cw_sync_status: true
 cw_sync_status_map:
   "New": "New"
   "Open: In Progress": "In Progress"
-  "Escalated: Internal": "In Progress"
-  "Resolved: Closed": "In Progress"
-  "Resolved: Canceled": "In Progress"
+  "Escalated: Internal": "Escalated"
+  "Resolved: Closed": "Resolved"
+  "Resolved: Canceled": "Cancelled"
   default: "In Progress"
 
 
