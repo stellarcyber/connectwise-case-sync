@@ -1,4 +1,4 @@
-__version__ = '20251205.000'
+__version__ = '20260103.000'
 
 '''
     Provides methods to call ConnctWise API for incident creation and update
@@ -12,6 +12,7 @@ __version__ = '20251205.000'
     20251204.000    added methods to support ticket ownership change events
     20251204.001    added truncation for max ticket summary length of 100
     20251205.000    added method get_tickets which retrieves tickets modified since TS
+    20260103.000    updated get_tickets with pagination
 
 '''
 
@@ -104,18 +105,30 @@ class ConnectWise:
         _AUTH_ = self.auth
         _HEADERS_ = self.headers
         since_ts_str = self._epoch_to_datestring(since_ts_epoch)
-        rr = {}
+        ret = []
         if since_ts_str:
             self.l.info("Getting tickets since: [{}] UTC".format(since_ts_str))
-            url = '{}/service/tickets?conditions=lastUpdated > "{}"'.format(_URL_, since_ts_str)
-            r = requests.get(url=url, headers=_HEADERS_, auth=_AUTH_)
-            if 200 <= r.status_code <= 299:
-                rr = json.loads(r.text)
-            else:
-                self.l.error("Error retrieving CW tickets: [{}: {}]".format(r.status_code, r.text))
+            page_cnt = 1
+            page_size = 50
+            while True:
+                url = '{}/service/tickets?conditions=lastUpdated > "{}"&pageSize={}&page={}'.format(_URL_, since_ts_str, page_size, page_cnt)
+                r = requests.get(url=url, headers=_HEADERS_, auth=_AUTH_)
+                if 200 <= r.status_code <= 299:
+                    rr = json.loads(r.text)
+                    if rr:
+                        self.l.debug("retrieved page: {}".format(page_cnt))
+                        ret.extend(rr)
+                        page_cnt += 1
+                        if len(rr) < page_size:
+                            break
+                    else:
+                        break
+                else:
+                    self.l.error("Error retrieving CW tickets: [{}: {}]".format(r.status_code, r.text))
+                    break
         else:
-            self.l.error("Cannot get ticket - echoch to string broken: [{}]".format(since_ts_epoch))
-        return rr
+            self.l.error("Cannot get ticket - epoch to string broken: [{}]".format(since_ts_epoch))
+        return ret
 
     def create_ticket(self, ticket_summary, company_name, board_name='', event_score=0, stellar_case_number=None):
         new_ticket_id = 0
