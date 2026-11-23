@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 
 '''
-	version:		20251208.000
+	version:		20261123.000
 	description:	connectwise integration script used to create Manage Service Tickets
 
     20251201.000    forked branch for improved efficiency and updated syncs
@@ -14,6 +14,9 @@
                     added forced update for ownership
                     improved tracking for stellar cases
     20251208.000    improved case closure sync
+    20260923.000    very minor fix to honor the CW master sync flag (it was being ignored prior)
+    20261123.000    added more debug messages to better understand sync status and flow
+                    improved retry methodology for when CW tickets fail to create
 
 '''
 
@@ -108,107 +111,108 @@ if __name__ == "__main__":
             '''   get CW tickets since checkpoint and compare with DB to see if they are sync'd '''
             ''''''
             r = CW.test_connection()
-            NEW_CHECKPOINT_TS = int(time() * 1000)
-            CHECKPOINT_TS = round(int(SU.checkpoint_read(filepath=CW_CHECKPOINT_FILENAME))/1000)
-            cw_tickets = CW.get_tickets(since_ts_epoch=CHECKPOINT_TS)
-            l.info("Found CW [{}] tickets modified since: [{}]".format(len(cw_tickets), CHECKPOINT_TS))
-            for cw_ticket in cw_tickets:
-                cw_ticket_number = cw_ticket.get('id', '')
-                cw_ticket_updated_str = cw_ticket.get('_info', {}).get('lastUpdated', '1970-01-01T00:00:00T')
-                cw_ticket_updated_ts = CW.datestring_to_epoch(cw_ticket_updated_str)
-                open_ticket = LDB.get_ticket_linkage(remote_ticket_id=cw_ticket_number)
-                if open_ticket and not open_ticket.get('state', '') == 'closed':
-                    rt_ticket_number = cw_ticket_number
-                    rt_ticket_last_modified = open_ticket.get('remote_ticket_last_modified', '')
-                    stellar_case_id = open_ticket.get('stellar_case_id', '')
-                    if cw_ticket_updated_ts > rt_ticket_last_modified:
-                        l.info("CW ticket has been modified since last sync: [{}] [ticket updated: {}] [last sync: {}]".format(rt_ticket_number, cw_ticket_updated_str, rt_ticket_last_modified))
+            if CW_SYNC_STATUS:
+                NEW_CHECKPOINT_TS = int(time() * 1000)
+                CHECKPOINT_TS = round(int(SU.checkpoint_read(filepath=CW_CHECKPOINT_FILENAME))/1000)
+                cw_tickets = CW.get_tickets(since_ts_epoch=CHECKPOINT_TS)
+                l.info("Found CW [{}] tickets modified since: [{}]".format(len(cw_tickets), CHECKPOINT_TS))
+                for cw_ticket in cw_tickets:
+                    cw_ticket_number = cw_ticket.get('id', '')
+                    cw_ticket_updated_str = cw_ticket.get('_info', {}).get('lastUpdated', '1970-01-01T00:00:00T')
+                    cw_ticket_updated_ts = CW.datestring_to_epoch(cw_ticket_updated_str)
+                    open_ticket = LDB.get_ticket_linkage(remote_ticket_id=cw_ticket_number)
+                    if open_ticket and not open_ticket.get('state', '') == 'closed':
+                        rt_ticket_number = cw_ticket_number
+                        rt_ticket_last_modified = open_ticket.get('remote_ticket_last_modified', '')
+                        stellar_case_id = open_ticket.get('stellar_case_id', '')
+                        if cw_ticket_updated_ts > rt_ticket_last_modified:
+                            l.info("CW ticket has been modified since last sync: [{}] [ticket updated: {}] [last sync: {}]".format(rt_ticket_number, cw_ticket_updated_str, rt_ticket_last_modified))
 
-                        ''' check on ticket resolution '''
-                        if CW_SYNC_STATUS:
-                            cw_status = cw_ticket.get('status', {}).get('name', '')
-                            stellar_status = ''
-                            if cw_status in CW_SYNC_STATUS_MAP:
-                                stellar_status = CW_SYNC_STATUS_MAP.get(cw_status, '')
-                            else:
-                                stellar_status = CW_SYNC_STATUS_MAP.get('default', '')
-                            if stellar_status.lower() in ["resolved"]:
-                                l.info("CW ticket in state [{} {}] | resolving related stellar case: [{}] [{}]".format(rt_ticket_number, cw_status, stellar_case_id, stellar_status))
-                                SU.resolve_stellar_case(case_id=stellar_case_id, update_alerts=True)
-                                LDB.close_ticket_linkage(stellar_case_id=stellar_case_id)
-                            elif stellar_status.lower() in ["cancelled"]:
-                                l.info("CW ticket in state [{} {}] | cencelling related stellar case: [{}] [{}]".format(rt_ticket_number, cw_status, stellar_case_id, stellar_status))
-                                SU.cancel_stellar_case(case_id=stellar_case_id, update_alerts=True)
-                                LDB.close_ticket_linkage(stellar_case_id=stellar_case_id)
-                            else:
-                                l.info("CW ticket in state [{} {}] | updating related stellar case: [{}] [{}]".format(rt_ticket_number, cw_status, stellar_case_id, stellar_status))
-                                SU.update_stellar_case (case_id=stellar_case_id, case_status=stellar_status, update_tag=False)
-                                LDB.update_remote_ticket_timestamp(stellar_case_id=stellar_case_id, rt_ticket_ts=cw_ticket_updated_ts)
-
-                        ''' check on ticket ownership '''
-                        if CW_SYNC_OWNER:
-                            if CW_FORCE_OWNER_SYNC:
-                                ''' force owner sync '''
-                                owner_link = cw_ticket.get('owner', {}).get('_info', {}).get('member_href', '')
-                                if owner_link:
-                                    new_owner_email = CW.get_member_email_via_link(owner_link)
-                                    SU.update_stellar_case_assignee(case_id=stellar_case_id, case_assignee=new_owner_email)
-                                    LDB.update_remote_ticket_timestamp(stellar_case_id=stellar_case_id, rt_ticket_ts=cw_ticket_updated_ts)
-                                    l.info("Updated stellar case with assignee: [{}] [{}]".format(stellar_case_id, new_owner_email))
-
-                            else:
-                                ''' get ownership changes from audit records '''
-                                owner_record = CW.get_ticket_ownership_change(rt_ticket_number)
-                                if owner_record:
-                                    owner_record_ts_str = owner_record.get('enteredDate', "1970-01-01T00:00:00Z")
-                                    owner_record_ts = CW.datestring_to_epoch(owner_record_ts_str)
-                                    if owner_record_ts > rt_ticket_last_modified:
-                                        owner_link = cw_ticket.get('owner', {}).get('_info', {}).get('member_href', '')
-                                        if owner_link:
-                                            new_owner_email = CW.get_member_email_via_link(owner_link)
-                                            SU.update_stellar_case_assignee(case_id=stellar_case_id, case_assignee=new_owner_email)
-                                            LDB.update_remote_ticket_timestamp(stellar_case_id=stellar_case_id, rt_ticket_ts=cw_ticket_updated_ts)
-                                            l.info("Updated stellar case with assignee: [{}] [{}]".format(stellar_case_id,
-                                                                                                       new_owner_email))
-
-                        ''' check on new notes '''
-                        if CW_SYNC_NOTES:
-                            ''' pull notes '''
-                            cw_ticket_notes = CW.get_ticket_notes(ticket_id=rt_ticket_number)
-                            for cw_ticket_note in cw_ticket_notes:
-                                cw_note_id = cw_ticket_note.get('id', 0)
-                                cw_note_text = cw_ticket_note.get('text')
-                                cw_note_ts_str = cw_ticket_note.get('_info', {}).get('lastUpdated', "2025-01-01T00:00:00Z")
-                                cw_note_ts = CW.datestring_to_epoch(cw_note_ts_str)
-                                if cw_note_ts > rt_ticket_last_modified:
-                                    l.info("Updating stellar case: [{}] with ticket note id: [{}]".format(stellar_case_id, cw_note_id))
-                                    SU.add_case_comment(case_id=stellar_case_id, comment=cw_note_text)
+                            ''' check on ticket resolution '''
+                            if CW_SYNC_STATUS:
+                                cw_status = cw_ticket.get('status', {}).get('name', '')
+                                stellar_status = ''
+                                if cw_status in CW_SYNC_STATUS_MAP:
+                                    stellar_status = CW_SYNC_STATUS_MAP.get(cw_status, '')
+                                else:
+                                    stellar_status = CW_SYNC_STATUS_MAP.get('default', '')
+                                if stellar_status.lower() in ["resolved"]:
+                                    l.info("CW ticket in state [{} {}] | resolving related stellar case: [{}] [{}]".format(rt_ticket_number, cw_status, stellar_case_id, stellar_status))
+                                    SU.resolve_stellar_case(case_id=stellar_case_id, update_alerts=True)
+                                    LDB.close_ticket_linkage(stellar_case_id=stellar_case_id)
+                                elif stellar_status.lower() in ["cancelled"]:
+                                    l.info("CW ticket in state [{} {}] | cencelling related stellar case: [{}] [{}]".format(rt_ticket_number, cw_status, stellar_case_id, stellar_status))
+                                    SU.cancel_stellar_case(case_id=stellar_case_id, update_alerts=True)
+                                    LDB.close_ticket_linkage(stellar_case_id=stellar_case_id)
+                                else:
+                                    l.info("CW ticket in state [{} {}] | updating related stellar case: [{}] [{}]".format(rt_ticket_number, cw_status, stellar_case_id, stellar_status))
+                                    SU.update_stellar_case (case_id=stellar_case_id, case_status=stellar_status, update_tag=False)
                                     LDB.update_remote_ticket_timestamp(stellar_case_id=stellar_case_id, rt_ticket_ts=cw_ticket_updated_ts)
 
-                        ''' check on audit items '''
-                        if CW_SYNC_AUDIT_RECORDS:
-                            ''' pull audit records  '''
-                            cw_audit_records = CW.get_audit_records(ticket_id=rt_ticket_number)
-                            for cw_audit_record in cw_audit_records:
-                                cw_ar_text = cw_audit_record.get('text', '')
-                                cw_ar_entered_by = cw_audit_record.get('enteredBy', '')
-                                cw_ar_audit_type = cw_audit_record.get('auditType', '')
-                                cw_ar_audit_subtype = cw_audit_record.get('auditSubType', '')
-                                cw_ar_audit_source = cw_audit_record.get('auditSource', '')
-                                # cw_note_ts_str = cw_audit_record.get('enteredDate')
-                                cw_note_ts_str = cw_audit_record.get('enteredDate', "1970-01-01T00:00:00Z")
-                                cw_note_ts = CW.datestring_to_epoch(cw_note_ts_str)
-                                if cw_note_ts > rt_ticket_last_modified:
-                                    stellar_comment_string = 'CW audit record\nType: {} Subtype: {} Time: {} By: {}\n[{}]'.format(
-                                        cw_ar_audit_type, cw_ar_audit_subtype, cw_note_ts_str, cw_ar_entered_by, cw_ar_text)
-                                    l.info("Updating stellar case: [{}] with ticket audit record: [{} / {}]".format(stellar_case_id, cw_note_ts_str, cw_ar_entered_by))
-                                    SU.add_case_comment(case_id=stellar_case_id, comment=stellar_comment_string)
-                                    LDB.update_remote_ticket_timestamp(stellar_case_id=stellar_case_id, rt_ticket_ts=cw_ticket_updated_ts)
+                            ''' check on ticket ownership '''
+                            if CW_SYNC_OWNER:
+                                if CW_FORCE_OWNER_SYNC:
+                                    ''' force owner sync '''
+                                    owner_link = cw_ticket.get('owner', {}).get('_info', {}).get('member_href', '')
+                                    if owner_link:
+                                        new_owner_email = CW.get_member_email_via_link(owner_link)
+                                        SU.update_stellar_case_assignee(case_id=stellar_case_id, case_assignee=new_owner_email)
+                                        LDB.update_remote_ticket_timestamp(stellar_case_id=stellar_case_id, rt_ticket_ts=cw_ticket_updated_ts)
+                                        l.info("Updated stellar case with assignee: [{}] [{}]".format(stellar_case_id, new_owner_email))
 
-            ''''''
-            ''' Complete CW loop                            '''
-            ''''''
-            SU.checkpoint_write(filepath=CW_CHECKPOINT_FILENAME, val=NEW_CHECKPOINT_TS)
+                                else:
+                                    ''' get ownership changes from audit records '''
+                                    owner_record = CW.get_ticket_ownership_change(rt_ticket_number)
+                                    if owner_record:
+                                        owner_record_ts_str = owner_record.get('enteredDate', "1970-01-01T00:00:00Z")
+                                        owner_record_ts = CW.datestring_to_epoch(owner_record_ts_str)
+                                        if owner_record_ts > rt_ticket_last_modified:
+                                            owner_link = cw_ticket.get('owner', {}).get('_info', {}).get('member_href', '')
+                                            if owner_link:
+                                                new_owner_email = CW.get_member_email_via_link(owner_link)
+                                                SU.update_stellar_case_assignee(case_id=stellar_case_id, case_assignee=new_owner_email)
+                                                LDB.update_remote_ticket_timestamp(stellar_case_id=stellar_case_id, rt_ticket_ts=cw_ticket_updated_ts)
+                                                l.info("Updated stellar case with assignee: [{}] [{}]".format(stellar_case_id,
+                                                                                                           new_owner_email))
+
+                            ''' check on new notes '''
+                            if CW_SYNC_NOTES:
+                                ''' pull notes '''
+                                cw_ticket_notes = CW.get_ticket_notes(ticket_id=rt_ticket_number)
+                                for cw_ticket_note in cw_ticket_notes:
+                                    cw_note_id = cw_ticket_note.get('id', 0)
+                                    cw_note_text = cw_ticket_note.get('text')
+                                    cw_note_ts_str = cw_ticket_note.get('_info', {}).get('lastUpdated', "2025-01-01T00:00:00Z")
+                                    cw_note_ts = CW.datestring_to_epoch(cw_note_ts_str)
+                                    if cw_note_ts > rt_ticket_last_modified:
+                                        l.info("Updating stellar case: [{}] with ticket note id: [{}]".format(stellar_case_id, cw_note_id))
+                                        SU.add_case_comment(case_id=stellar_case_id, comment=cw_note_text)
+                                        LDB.update_remote_ticket_timestamp(stellar_case_id=stellar_case_id, rt_ticket_ts=cw_ticket_updated_ts)
+
+                            ''' check on audit items '''
+                            if CW_SYNC_AUDIT_RECORDS:
+                                ''' pull audit records  '''
+                                cw_audit_records = CW.get_audit_records(ticket_id=rt_ticket_number)
+                                for cw_audit_record in cw_audit_records:
+                                    cw_ar_text = cw_audit_record.get('text', '')
+                                    cw_ar_entered_by = cw_audit_record.get('enteredBy', '')
+                                    cw_ar_audit_type = cw_audit_record.get('auditType', '')
+                                    cw_ar_audit_subtype = cw_audit_record.get('auditSubType', '')
+                                    cw_ar_audit_source = cw_audit_record.get('auditSource', '')
+                                    # cw_note_ts_str = cw_audit_record.get('enteredDate')
+                                    cw_note_ts_str = cw_audit_record.get('enteredDate', "1970-01-01T00:00:00Z")
+                                    cw_note_ts = CW.datestring_to_epoch(cw_note_ts_str)
+                                    if cw_note_ts > rt_ticket_last_modified:
+                                        stellar_comment_string = 'CW audit record\nType: {} Subtype: {} Time: {} By: {}\n[{}]'.format(
+                                            cw_ar_audit_type, cw_ar_audit_subtype, cw_note_ts_str, cw_ar_entered_by, cw_ar_text)
+                                        l.info("Updating stellar case: [{}] with ticket audit record: [{} / {}]".format(stellar_case_id, cw_note_ts_str, cw_ar_entered_by))
+                                        SU.add_case_comment(case_id=stellar_case_id, comment=stellar_comment_string)
+                                        LDB.update_remote_ticket_timestamp(stellar_case_id=stellar_case_id, rt_ticket_ts=cw_ticket_updated_ts)
+
+                ''''''
+                ''' Complete CW loop                            '''
+                ''''''
+                SU.checkpoint_write(filepath=CW_CHECKPOINT_FILENAME, val=NEW_CHECKPOINT_TS)
 
 
             ''''''
@@ -221,12 +225,15 @@ if __name__ == "__main__":
             cases = SU.get_stellar_cases(from_ts=CHECKPOINT_TS, use_modified_at=True)
             for case in cases.get('cases', {}):
                 stellar_case_id = case.get("_id")
+                l.debug("Processing stellar case id: [{}]".format(stellar_case_id))
 
                 ''' if the case is already sync'd - skip over '''
                 syncd_case = LDB.get_ticket_linkage(stellar_case_id=stellar_case_id)
                 if syncd_case:
+                    l.debug("Stellar case already synced .. skipping further processing: [{}]".format(stellar_case_id))
                     continue
 
+                l.debug("Creating CW ticket for stellar case id: [{}]".format(stellar_case_id))
                 stellar_case_number = case.get('ticket_id')
                 case_name = case.get('name', '')
                 case_score = case.get('score', 0)
@@ -239,6 +246,7 @@ if __name__ == "__main__":
                                                                                      stellar_url))
                 new_ticket_id = CW.create_ticket(ticket_summary=case_name, company_name=case_tenant_name, event_score=case_score, stellar_case_number=stellar_case_number)
                 if new_ticket_id:
+                    l.debug("CW ticket successfully created: [cw ticket: {}] [stellar case_id: {} | tenant: {}]".format(new_ticket_id, stellar_case_id, case_tenant_name))
                     ticket_note_text = CW.create_ticket_note_text(case_summary=case_summary,
                                                                   case_tenant_name=case_tenant_name, case_url=stellar_url,
                                                                   alerts=event_names)
@@ -247,7 +255,9 @@ if __name__ == "__main__":
                     SU.update_stellar_case(case_id=stellar_case_id, case_comment=stellar_comment)
                     LDB.put_ticket_linkage(stellar_case_id=stellar_case_id, stellar_case_number=stellar_case_number, remote_ticket_id=new_ticket_id)
                 else:
-                    l.error("Failed to create Connectwise ticket - see log messages for more information")
+                    l.error("Failed to create Connectwise ticket - will retry: [stellar case_id: {} | tenant: {}]".format(stellar_case_id, case_tenant_name))
+                    ''' 2026/11/23 - added stellar case comment that will bump retry '''
+                    SU.add_case_comment(case_id=stellar_case_id, comment="CW ticket creation failed - triggering retry")
 
             SU.checkpoint_write(filepath=STELLAR_CHECKPOINT_FILENAME, val=NEW_CHECKPOINT_TS)
             ts_loop_duration = time() - ts_start_of_loop
