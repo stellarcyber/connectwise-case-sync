@@ -1020,7 +1020,7 @@ class STELLAR_UTIL:
                 }
                 # r = self._request_post(headers=headers, path=path)
                 try:
-                    r = requests.post(url, verify=False, headers=headers, timeout=10)
+                    r = requests.post(url, verify=False, headers=headers, timeout=20)
                     return_code = r.status_code
                     if 200 <= r.status_code <= 299:
                         response = r.json()
@@ -1048,7 +1048,7 @@ class STELLAR_UTIL:
                 }
                 # r = self._request_post(headers=headers, path=path)
                 try:
-                    r = requests.post(url, verify=False, headers=headers, timeout=10)
+                    r = requests.post(url, verify=False, headers=headers, timeout=20)
                     return_code = r.status_code
                     if 200 <= r.status_code <= 299:
                         response = r.json()
